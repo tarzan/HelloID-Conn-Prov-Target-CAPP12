@@ -9,7 +9,7 @@ function Assert-True($Condition, [string] $Message) {
 
 function Invoke-RestMethod {
     [CmdletBinding()]
-    param($Uri, $Method, $Headers, $Body, $ContentType)
+    param($Uri, $Method, $Headers, $Body, $ContentType, $TimeoutSec, $MaximumRedirection)
 
     if ($Uri -like '*/oauth2/token') {
         return @{ token_type = 'Bearer'; access_token = 'test-token' }
