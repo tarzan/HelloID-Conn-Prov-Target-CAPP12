@@ -6,6 +6,8 @@
 # Enable TLS1.2
 [System.Net.ServicePointManager]::SecurityProtocol = [System.Net.ServicePointManager]::SecurityProtocol -bor [System.Net.SecurityProtocolType]::Tls12
 
+$script:cappRequestDeadline = $null
+
 #region functions
 function Get-Capp12AuthorizationTokenAndCreateHeaders {
     [CmdletBinding()]
@@ -25,7 +27,7 @@ function Get-Capp12AuthorizationTokenAndCreateHeaders {
             Body        = $authorizationBody | ConvertTo-Json -Depth 10
         }
 
-        $accessToken = Invoke-RestMethod @splatInvoke
+        $accessToken = Invoke-Capp12Request @splatInvoke
 
         Write-Information 'Adding Authorization headers'
         $headers = [System.Collections.Generic.Dictionary[[String], [String]]]::new()
@@ -36,6 +38,69 @@ function Get-Capp12AuthorizationTokenAndCreateHeaders {
     }
     catch {
         $PSCmdlet.ThrowTerminatingError($_)
+    }
+}
+
+function Invoke-Capp12Request {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)] [string] $Uri,
+        [Parameter(Mandatory)] [ValidateSet('GET', 'POST')] [string] $Method,
+        $Headers,
+        $Body,
+        [string] $ContentType
+    )
+
+    $requestUri = $null
+    if (-not [Uri]::TryCreate($Uri, [UriKind]::Absolute, [ref] $requestUri) -or
+        $requestUri.Scheme -ne 'https' -or -not [string]::IsNullOrEmpty($requestUri.UserInfo)) {
+        throw 'CAPP12 requests require an absolute HTTPS URL without embedded credentials.'
+    }
+    $parameters = @{
+        Uri = $requestUri.AbsoluteUri; Method = $Method
+        MaximumRedirection = 0; ErrorAction = 'Stop'
+    }
+    foreach ($name in 'Headers', 'Body', 'ContentType') {
+        if ($PSBoundParameters.ContainsKey($name)) { $parameters[$name] = $PSBoundParameters[$name] }
+    }
+
+    for ($attempt = 0; $attempt -lt 3; $attempt++) {
+        $parameters.TimeoutSec = 10
+        if ($null -ne $script:cappRequestDeadline) {
+            $remaining = [Math]::Floor(($script:cappRequestDeadline - [datetime]::UtcNow).TotalSeconds)
+            if ($remaining -lt 1) { throw 'CAPP12 account action request budget exhausted; retry the action later.' }
+            $parameters.TimeoutSec = [int] [Math]::Min(10, $remaining)
+        }
+        try {
+            return Invoke-RestMethod @parameters
+        }
+        catch {
+            # POST may already have committed when a response fails. Only retry reads.
+            $response = $_.Exception.Response
+            $status = [int] $response.StatusCode
+            if ($Method -ne 'GET' -or $attempt -eq 2 -or $status -notin @(429, 502, 503, 504)) { throw }
+
+            $delay = [Math]::Pow(2, $attempt)
+            $retryAfter = $null
+            if ($response -is [System.Net.Http.HttpResponseMessage]) {
+                $values = $null
+                if ($response.Headers.TryGetValues('Retry-After', [ref] $values)) { $retryAfter = @($values)[0] }
+            }
+            elseif ($null -ne $response.Headers) { $retryAfter = $response.Headers['Retry-After'] }
+            $seconds = 0
+            $retryDate = [DateTimeOffset]::MinValue
+            if ([int]::TryParse($retryAfter, [ref] $seconds)) {
+                $delay = [Math]::Max(0, $seconds)
+            }
+            elseif ([DateTimeOffset]::TryParse($retryAfter, [Globalization.CultureInfo]::InvariantCulture,
+                    [Globalization.DateTimeStyles]::AssumeUniversal, [ref] $retryDate)) {
+                $delay = [Math]::Max(0, [Math]::Ceiling(($retryDate - [DateTimeOffset]::UtcNow).TotalSeconds))
+            }
+            # Do not retry earlier than the server requested, or sleep past the host's deadline.
+            if ($delay -gt 10 -or ($null -ne $script:cappRequestDeadline -and
+                    ($script:cappRequestDeadline - [datetime]::UtcNow).TotalSeconds -le ($delay + 1))) { throw }
+            Start-Sleep -Seconds $delay
+        }
     }
 }
 
@@ -90,15 +155,20 @@ try {
         Headers = $headers
         Method  = 'GET'
     }
-    $existingPositions = Invoke-RestMethod @getPositionsSplat | ConvertFrom-Csv -Delimiter ';'
+    $existingPositions = Invoke-Capp12Request @getPositionsSplat | ConvertFrom-Csv -Delimiter ';'
+    $existingPositionsByCode = @{}
+    foreach ($existing in $existingPositions) {
+        if ([string]::IsNullOrEmpty($existing.code)) { continue }
+        if ($existingPositionsByCode.ContainsKey($existing.code)) {
+            throw "Multiple existing positions found with code [$($existing.code)]."
+        }
+        $existingPositionsByCode[$existing.code] = $existing
+    }
     
     $actionMessage = 'processing position resources'
     foreach ($resource in $resourceContext.SourceData) {
         try {
-            $existingPosition = $existingPositions | Where-Object { $_.code -eq $resource.ExternalId }
-            if ($existingPosition.Count -gt 1) {
-                Throw "Multiple existing positions found with code [$($resource.ExternalId)]."
-            }
+            $existingPosition = $existingPositionsByCode[[string] $resource.ExternalId]
 
             if ($null -eq $existingPosition) {
                 $action = 'CreateResource'
@@ -128,7 +198,8 @@ try {
                             Method  = 'POST'
                             Body    = [System.Text.Encoding]::UTF8.GetBytes(($body | ConvertTo-Json -Depth 10))
                         }
-                        $null = Invoke-RestMethod @splatPositions
+                        $null = Invoke-Capp12Request @splatPositions
+                        $existingPositionsByCode[[string] $resource.ExternalId] = $body
                     }
                     else {
                         Write-Information "[DryRun] $action`: [$($resource.ExternalId)] CAPP12 position, will be executed during enforcement"

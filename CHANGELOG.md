@@ -2,6 +2,13 @@
 
 All notable changes to this project will be documented in this file. The format is based on [Keep a Changelog](https://keepachangelog.com), and this project adheres to [Semantic Versioning](https://semver.org).
 
+## [2.0.4] - 30-10-2026
+
+### Changed
+- Enforced HTTPS, disabled redirects, encoded account lookup values, and bounded HTTP request timeouts.
+- Added bounded retries for transient GET failures, respecting Retry-After and the account action time budget. Writes are not automatically replayed.
+- Indexed resource and permission-name lookups by code, and updated the resource index after successful writes.
+
 ## [2.0.1] - 28-07-2026
 
 ### Fixed

@@ -86,6 +86,14 @@ The following settings are required to connect to the API.
 | ClientSecret | The ClientSecret to connect to the API                  | Yes       |
 | BaseUrl      | The URL to the API (example: https://defacto.capp12.nl) | Yes       |
 
+### Request handling
+
+- Use the final HTTPS base URL; redirects are rejected before forwarding credentials or bearer tokens.
+- Each HTTP request is configured with a 10-second timeout (shorter when the account action budget is nearly exhausted). Account lifecycle scripts reserve a 25-second request budget within HelloID's [30-second execution limit](https://docs.helloid.com/en/provisioning/target-systems/powershell-v2-target-systems/account-lifecycle--powershell-v2-target-systems-/account-scripts--powershell-v2-target-systems-.html).
+- GET requests retry HTTP 429, 502, 503, and 504 at most twice, using exponential delays or `Retry-After`. Delays exceeding 10 seconds or the remaining account budget fail the action for a later retry.
+- POST requests, including token requests and writes, are not automatically replayed. A failed write response can have an unknown outcome; check current state before retrying the action.
+- Tokens remain local to each script execution. No shared token cache or credential persistence is introduced.
+
 ### Correlation configuration
 
 The correlation configuration is used to specify which properties will be used to match an existing account within _CAPP12_ to a person in _HelloID_.
