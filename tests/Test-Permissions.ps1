@@ -30,7 +30,7 @@ foreach ($case in @(
 $global:CappPermissionTestState = @{}
 function Invoke-RestMethod {
     [CmdletBinding()]
-    param($Uri, $Method, $Headers, $Body, $ContentType)
+    param($Uri, $Method, $Headers, $Body, $ContentType, $TimeoutSec, $MaximumRedirection)
     if ($Uri -like '*/oauth2/token') { return @{ token_type = 'Bearer'; access_token = 'test-token' } }
     if ($Uri -like '*/users?code=*') {
         return [PSCustomObject]@{ code = '123'; active = ($global:CappPermissionTestState.Mode -ne 'inactive') }
