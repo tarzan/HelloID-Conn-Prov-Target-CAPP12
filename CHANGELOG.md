@@ -2,6 +2,12 @@
 
 All notable changes to this project will be documented in this file. The format is based on [Keep a Changelog](https://keepachangelog.com), and this project adheres to [Semantic Versioning](https://semver.org).
 
+## [2.0.2] - 30-10-2026
+
+### Fixed
+- Corrected account lookup error handling so only HTTP 404 is treated as a missing account.
+- Fixed a syntax error in the update script and ensured mapped ADFS login updates are sent even when no other fields change.
+
 ## [2.0.1] - 28-07-2026
 
 ### Fixed

@@ -97,18 +97,13 @@ try {
     }
     catch {
         # 404 Indicates that the account is not Found!
-        if (-not $_.Exception.Response.StatusCode -eq 404) {
+        if ($_.Exception.Response.StatusCode -ne 404) {
             throw $_
         }
     }
     $outputContext.PreviousData = $correlatedAccount
 
     $actionMessage = 'processing account data'
-    # If the account is inactive, we need to make sure the adfs_login is going to be updated.
-    if ($correlatedAccount.active -eq $false) {
-        $correlatedAccount | Add-Member -MemberType NoteProperty -Name 'adfs_login' -Value $null -Force
-    }
-
     # For all active accounts maintained by HelloID, we want the ends_on to be null making sure the account is active.
     $actionContext.Data | Add-Member -MemberType NoteProperty -Name 'ends_on' -Value $null -Force
     $actionContext.Data | Add-Member -MemberType NoteProperty -Name 'code' -Value $actionContext.References.Account -Force
@@ -119,7 +114,11 @@ try {
             DifferenceObject = @($actionContext.Data.PSObject.Properties)
         }
         $propertiesChanged = Compare-Object @splatCompareProperties -PassThru | Where-Object { 
-            $_.SideIndicator -eq '=>' -and $correlatedAccount.PSObject.Properties.Name -contains $_.Name 
+            # GET /users does not expose adfs_login. Always send the mapped login
+            # during an update, including when it is the only changed field.
+            $_.SideIndicator -eq '=>' -and (
+                $correlatedAccount.PSObject.Properties.Name -contains $_.Name -or $_.Name -eq 'adfs_login'
+            )
         }
         if ($propertiesChanged) {
             $lifecycleProcess = 'UpdateAccount'
@@ -190,7 +189,7 @@ catch {
         $($ex.Exception.GetType().FullName -eq 'System.Net.WebException')) {
         $errorObj = Resolve-CAPP12Error -ErrorObject $ex
         $auditLogMessage = "Error $($actionMessage). Error: $($errorObj.FriendlyMessage)"
-        $warningMessage = "Error at Line [$($errorObj.ScriptLineNumber)]: $($errorObj.Line). Error: $($errorObj.ErrorDetails)"z 
+        $warningMessage = "Error at Line [$($errorObj.ScriptLineNumber)]: $($errorObj.Line). Error: $($errorObj.ErrorDetails)"
     }
     else {
         $auditLogMessage = "Error $($actionMessage). Error: $($ex.Exception.Message)"

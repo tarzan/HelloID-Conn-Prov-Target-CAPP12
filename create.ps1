@@ -113,7 +113,7 @@ try {
         }
         catch {
             # 404 Indicates that the account is not Found!
-            if (-not $_.Exception.Response.StatusCode -eq 404) {
+            if ($_.Exception.Response.StatusCode -ne 404) {
                 throw $_
             }
         }
