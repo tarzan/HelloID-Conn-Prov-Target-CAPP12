@@ -7,6 +7,18 @@
 [System.Net.ServicePointManager]::SecurityProtocol = [System.Net.ServicePointManager]::SecurityProtocol -bor [System.Net.SecurityProtocolType]::Tls12
 
 #region functions
+function Get-Capp12Today {
+    param([datetime] $UtcNow = [datetime]::UtcNow)
+    # CAPP evaluates end dates in Europe/Amsterdam, regardless of the agent timezone.
+    try {
+        $timeZone = [TimeZoneInfo]::FindSystemTimeZoneById('Europe/Amsterdam')
+    }
+    catch [System.TimeZoneNotFoundException] {
+        $timeZone = [TimeZoneInfo]::FindSystemTimeZoneById('W. Europe Standard Time')
+    }
+    return [TimeZoneInfo]::ConvertTimeFromUtc($UtcNow, $timeZone).Date
+}
+
 function Get-Capp12AuthorizationTokenAndCreateHeaders {
     [CmdletBinding()]
     param()
@@ -124,7 +136,7 @@ try {
                         code       = $actionContext.References.Account
                         email      = ""
                         adfs_login = ""
-                        ends_on    = (Get-Date).AddDays(-1).ToString('dd-MM-yyyy')
+                        ends_on    = (Get-Capp12Today).AddDays(-1).ToString('dd-MM-yyyy')
                     } | ConvertTo-Json
                 }
                 else {
@@ -132,7 +144,7 @@ try {
                         code       = $actionContext.References.Account
                         email      = $actionContext.Data.email
                         adfs_login = $actionContext.Data.adfs_login
-                        ends_on    = (Get-Date).AddDays(-1).ToString('dd-MM-yyyy')
+                        ends_on    = (Get-Capp12Today).AddDays(-1).ToString('dd-MM-yyyy')
                     } | ConvertTo-Json
                 }
 

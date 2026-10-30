@@ -1,0 +1,17 @@
+name: Test PowerShell
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Run mocked connector regression checks
+        shell: pwsh
+        run: Get-ChildItem ./tests/Test-*.ps1 | ForEach-Object { & $_.FullName }

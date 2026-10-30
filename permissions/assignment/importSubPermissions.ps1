@@ -11,6 +11,18 @@ $permissionReference = 'assignment'
 $permissionDisplayName = 'Position assignment'
 
 #region functions
+function Get-Capp12Today {
+    param([datetime] $UtcNow = [datetime]::UtcNow)
+    # CAPP evaluates end dates in Europe/Amsterdam, regardless of the agent timezone.
+    try {
+        $timeZone = [TimeZoneInfo]::FindSystemTimeZoneById('Europe/Amsterdam')
+    }
+    catch [System.TimeZoneNotFoundException] {
+        $timeZone = [TimeZoneInfo]::FindSystemTimeZoneById('W. Europe Standard Time')
+    }
+    return [TimeZoneInfo]::ConvertTimeFromUtc($UtcNow, $timeZone).Date
+}
+
 function Get-Capp12AuthorizationTokenAndCreateHeaders {
     [CmdletBinding()]
     param()
@@ -102,12 +114,11 @@ try {
 
     $actionMessage = 'filtering assignment permissions'
 
+    $today = Get-Capp12Today
     $importedPermissions = $unfilteredImportedPermissions | Where-Object {
-        # Keep when ends_on is empty or a date in the future
-        if ([string]::IsNullOrEmpty($_.ends_on))
-        { $true }
-        else
-        { [datetime]::Parse($_.ends_on) -gt [datetime]::Now }
+        # The end date is inclusive: keep relationships through today in CAPP's timezone.
+        [string]::IsNullOrEmpty($_.ends_on) -or
+        [datetime]::ParseExact($_.ends_on, 'yyyy-MM-dd', [Globalization.CultureInfo]::InvariantCulture).Date -ge $today
     }
 
     $splatImportPositionsParams = @{
@@ -117,6 +128,7 @@ try {
     }
 
     $groupedPermissions = $importedPermissions | Group-Object -Property position_code -AsHashTable
+    if ($null -eq $groupedPermissions) { $groupedPermissions = @{} }
 
     $importedPositionsCsv = Invoke-RestMethod @splatImportPositionsParams
     $importedPositions = $importedPositionsCsv | ConvertFrom-Csv -Delimiter ';'

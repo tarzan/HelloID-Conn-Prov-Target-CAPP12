@@ -11,6 +11,18 @@ $permissionReference = 'manager'
 $permissionDisplayName = 'Department manager'
 
 #region functions
+function Get-Capp12Today {
+    param([datetime] $UtcNow = [datetime]::UtcNow)
+    # CAPP evaluates end dates in Europe/Amsterdam, regardless of the agent timezone.
+    try {
+        $timeZone = [TimeZoneInfo]::FindSystemTimeZoneById('Europe/Amsterdam')
+    }
+    catch [System.TimeZoneNotFoundException] {
+        $timeZone = [TimeZoneInfo]::FindSystemTimeZoneById('W. Europe Standard Time')
+    }
+    return [TimeZoneInfo]::ConvertTimeFromUtc($UtcNow, $timeZone).Date
+}
+
 function Get-Capp12AuthorizationTokenAndCreateHeaders {
     [CmdletBinding()]
     param()
@@ -97,11 +109,18 @@ try {
     }
 
     $importedPermissionsCsv = Invoke-RestMethod @splatImportPermissionParams
-    $importedPermissions = $importedPermissionsCsv | ConvertFrom-Csv -Delimiter ';'
-    Write-Information "Queried manager permissions. Result count: $($importedPermissions.Count)"
+    $unfilteredImportedPermissions = $importedPermissionsCsv | ConvertFrom-Csv -Delimiter ';'
+    Write-Information "Queried manager permissions. Result count: $($unfilteredImportedPermissions.Count)"
+
+    $today = Get-Capp12Today
+    $importedPermissions = $unfilteredImportedPermissions | Where-Object {
+        [string]::IsNullOrEmpty($_.ends_on) -or
+        [datetime]::ParseExact($_.ends_on, 'yyyy-MM-dd', [Globalization.CultureInfo]::InvariantCulture).Date -ge $today
+    }
 
     $actionMessage = 'importing manager sub-permission entitlements to HelloID'
     $groupedPermissions = $importedPermissions | Group-Object -Property department_code -AsHashTable
+    if ($null -eq $groupedPermissions) { $groupedPermissions = @{} }
 
     $importedSubPermissions = 0
     foreach ($importedPermission in $groupedPermissions.GetEnumerator()) {

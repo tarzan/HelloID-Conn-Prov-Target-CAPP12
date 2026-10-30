@@ -12,6 +12,18 @@ $PrimaryLookupKey = { $_.Title.ExternalId } # Mandatory
 $SecondaryLookupKey = { $_.Title.Name } # Mandatory
 
 #region functions
+function Get-Capp12Today {
+    param([datetime] $UtcNow = [datetime]::UtcNow)
+    # CAPP evaluates end dates in Europe/Amsterdam, regardless of the agent timezone.
+    try {
+        $timeZone = [TimeZoneInfo]::FindSystemTimeZoneById('Europe/Amsterdam')
+    }
+    catch [System.TimeZoneNotFoundException] {
+        $timeZone = [TimeZoneInfo]::FindSystemTimeZoneById('W. Europe Standard Time')
+    }
+    return [TimeZoneInfo]::ConvertTimeFromUtc($UtcNow, $timeZone).Date
+}
+
 function Get-Capp12AuthorizationTokenAndCreateHeaders {
     [CmdletBinding()]
     param()
@@ -100,7 +112,13 @@ try {
         Headers = $headers
         Method  = 'GET'
     }
-    $null = Invoke-RestMethod @splatGetUserParams
+    $account = Invoke-RestMethod @splatGetUserParams
+    if ($account.active -eq $false) {
+        foreach ($permission in $actionContext.CurrentPermissions) {
+            $outputContext.SubPermissions.Add($permission)
+        }
+        throw 'The CAPP12 account is inactive. Revoke permissions before account deactivation; existing relationships may still remain.'
+    }
 
     $actionMessage = 'collecting current and desired permissions'
     # Collect current permissions
@@ -199,7 +217,7 @@ try {
                 $body = [PSCustomObject]@{
                     user_code     = $actionContext.References.Account
                     position_code = $permission.Key
-                    ends_on       = (Get-Date).AddDays(-1).ToString('dd-MM-yyyy')
+                    ends_on       = (Get-Capp12Today).AddDays(-1).ToString('dd-MM-yyyy')
                 } | ConvertTo-Json -Depth 10
 
                 $splatWebRequest = @{
@@ -238,23 +256,18 @@ try {
                 $warningMessage = "Error at Line [$($ex.InvocationInfo.ScriptLineNumber)]: $($ex.InvocationInfo.Line). Error: $($ex.Exception.Message)"
             }
             
-            # Check if the error is because user or position doesn't exist (already revoked)
-            if ($auditMessage -like "*Can't find user with code*" -or $auditMessage -like "*position with code*") {
-                $outputContext.AuditLogs.Add([PSCustomObject]@{
-                        Action  = 'RevokePermission'
-                        Message = "Skipped revoking assignment position [$($permission.Value) ($($permission.Name))] for user [$($actionContext.References.Account)]. Reason: User or position no longer exists (assignment already revoked)."
-                        IsError = $false
-                    })
-            }
-            else {
-                Write-Warning $warningMessage
-                
-                $outputContext.AuditLogs.Add([PSCustomObject]@{
-                        Action  = 'RevokePermission'
-                        Message = $auditMessage
-                        IsError = $true
-                    })
-            }
+            # A missing/inactive user or archived resource does not prove the
+            # relationship was removed. Preserve it for a later retry.
+            Write-Warning $warningMessage
+            $outputContext.SubPermissions.Add([PSCustomObject]@{
+                    DisplayName = $permission.Value
+                    Reference   = [PSCustomObject]@{ Id = $permission.Name }
+                })
+            $outputContext.AuditLogs.Add([PSCustomObject]@{
+                    Action  = 'RevokePermission'
+                    Message = $auditMessage
+                    IsError = $true
+                })
         }
     }
 

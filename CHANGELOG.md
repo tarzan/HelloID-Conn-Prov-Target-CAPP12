@@ -2,6 +2,17 @@
 
 All notable changes to this project will be documented in this file. The format is based on [Keep a Changelog](https://keepachangelog.com), and this project adheres to [Semantic Versioning](https://semver.org).
 
+## [2.0.3] - 30-10-2026
+
+### Fixed
+- Imported manager permissions now exclude expired relationships, and all permission imports treat the end date as inclusive in the CAPP timezone.
+- Failed revocations remain errors and retain the permission for retry; inactive accounts must have permissions revoked before deactivation.
+- Manager updates with no desired departments can revoke the final manager permission.
+- Empty permission exports complete successfully.
+
+### Changed
+- Documented account end-dating and active-only connector imports.
+
 ## [2.0.1] - 28-07-2026
 
 ### Fixed

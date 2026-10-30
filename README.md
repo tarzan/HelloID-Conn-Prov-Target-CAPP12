@@ -53,11 +53,11 @@ The following features are available:
 
 ### ⚠️ Account Lifecycle
 
-The CAPP12 API does not support account deletion so the delete script disables the account instead.
+Account removal uses CAPP12's supported end-dating mechanism: the delete script sets `ends_on` to yesterday to deactivate the account. The user record and learning history are retained.
 
 ### ⚠️ Entitlement Import: Accounts/Permissions
 
-Because of limitations in the API, only active accounts and permissions are imported.
+This connector uses the default exports and imports only active accounts and permissions. CAPP versions supporting `?all=true` can also export inactive records; this connector does not currently use that option.
 
 ### ⚠️ Governance Reconciliation Resolutions
 
@@ -144,7 +144,8 @@ erDiagram
 
 - The connector applies disable semantics instead of hard delete.
 - Create and update actions keep accounts active by setting `ends_on` to `null`.
-- Delete sets `ends_on` to yesterday to inactivate the account.
+- Delete sets `ends_on` to yesterday in Europe/Amsterdam to inactivate the account. End dates are inclusive: today remains valid through today.
+- For an existing account, `code` and `ends_on` are sufficient for deactivation. Omitting both login fields also immediately deactivates the account and clears email/ADFS login, even if the end date is in the future. Preserve the mapped login fields when scheduling a future end date.
 - In the delete mapping, `adfs_login` and `email` are configured with empty string values. This setup can be used to free unique values for reuse after inactivation.
   - Validate this behavior with the customer before go-live, because it affects identity reuse policy.
 
@@ -154,15 +155,15 @@ erDiagram
 
 ### Sub-permission processing
 
-- Grant actions set `ends_on` to `null`; revoke actions set `ends_on` to yesterday.
-- For inactive users, permissions cannot be managed afterwards, so permissions should be revoked before account inactivation.
+- Grant actions set `ends_on` to `null`; revoke actions set `ends_on` to yesterday in Europe/Amsterdam. Imports retain relationships through the end date, including today.
+- Revoke permissions before account inactivation. CAPP rejects relationship writes for inactive users or archived resources; a failed revoke does not prove that the relationship was removed. The connector reports the failure and retains failed revocations for retry. Resolve remaining relationships before reactivating an account.
 - The manager permission requires the custom field `ManagerOf` with a comma-separated list of department identifiers (e.g. `"Department1","Department2"`).
 
 ### Import limitations
 
 - Bulk import data is not real-time and is typically current after nightly processing.
 - `adfs_login` is not available in bulk user data.
-- Account and permission import only supports active items (no end date, or a future end date).
+- Account and permission imports use active-only exports; relationship imports retain no end date, today, or a future end date in Europe/Amsterdam.
 - Accounts with a missing `code` are filtered from the import, because they cannot be referenced or managed from HelloID.
 
 ## Development resources
